@@ -136,6 +136,8 @@ button{cursor:pointer}
 .blk{fill:var(--block);stroke:none}
 .blk.q0{fill:var(--q0)} .blk.q1{fill:var(--q1)} .blk.q2{fill:var(--q2)} .blk.q3{fill:var(--q3)} .blk.q4{fill:var(--q4)} .blk.q5{fill:var(--q5)}
 .blk.hov{stroke:var(--ink);stroke-width:1.5;vector-effect:non-scaling-stroke}
+#map.has-base .blk{fill-opacity:.1}
+.tile{pointer-events:none}
 .bar{fill:none;stroke:var(--ink-3);stroke-width:1;stroke-dasharray:5 3;vector-effect:non-scaling-stroke;pointer-events:none}
 .bar.on{stroke:var(--brand);stroke-width:2.5;stroke-dasharray:none}
 .bmask{fill:var(--ground);fill-opacity:.55;pointer-events:none;fill-rule:evenodd}
@@ -342,7 +344,6 @@ textarea{min-height:76px;resize:vertical}
     </div>
     <div class="tright">
       <span class="mode" id="mode"><i></i><span id="modeTxt"></span></span>
-      <button class="tbtn" id="tSample" aria-pressed="false" title="Mostrar registros simulados para ver cómo funcionan las estadísticas"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 1.5h4M7 1.5v4.2L2.6 13a1 1 0 0 0 .9 1.5h9a1 1 0 0 0 .9-1.5L9 5.7V1.5"/><path d="M4.5 10h7" opacity=".6"/></svg><span class="tl">Ejemplo</span></button>
       <button class="tbtn" id="bAuth" hidden><span class="tl" id="bAuthTxt">Acceso técnico</span></button>
       <button class="tbtn" id="tRight" aria-pressed="true" aria-controls="right" title="Análisis y registros"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 14V8M6 14V3M10 14V6M14 14V10"/></svg><span class="tl">Análisis</span></button>
     </div>
@@ -355,7 +356,6 @@ textarea{min-height:76px;resize:vertical}
 
   <section class="mapwrap" id="mapwrap">
     <svg id="map" tabindex="0" role="application" aria-label="Mapa de la Plataforma G. Clic derecho o mantener presionado para reportar."></svg>
-    <div class="banner" id="banner" hidden><span>Datos de ejemplo: no son registros reales</span><button type="button" id="bannerX">Quitar</button></div>
     <div class="picking" id="picking" hidden></div>
     <div class="mctl">
       <button type="button" id="zi" aria-label="Acercar" title="Acercar (+)"><svg viewBox="0 0 16 16" stroke="currentColor" stroke-width="1.8"><path d="M8 3v10M3 8h10"/></svg></button>
@@ -518,7 +518,7 @@ const S={
   on:{obras:true,reports:true,puntos:true,heat:false,inc:false,streets:true,snames:true,barrios:true,manz:true,equip:false,limit:true},
   hide:{obras:new Set(),reports:new Set(['rechazado']),puntos:new Set(),inc:new Set(),equip:new Set()},
   streetMode:'rod',manzMode:'flat',heatSrc:'both',open:new Set(['obras','puntos']),
-  sel:null,sample:false,rtab:'stats',recKind:'reports',pick:null,
+  sel:null,sample:false,basemap:'none',rtab:'stats',recKind:'reports',pick:null,
 };
 
 /* =================== Almacen de datos =================== */
@@ -613,6 +613,7 @@ Store.patch=async(k,id,patch)=>{
 };
 Store.remove=async(k,id)=>{
   const c=COLS[k];
+  lsSet('pg_mis_'+k,mineOf(k).filter(m=>m.id!==id));
   if(Store.mode==='db')return Store.db.collection(k).doc(id).delete();
   if(Store.mode==='supabase'){await sbWrite('DELETE',c,'?id=eq.'+encodeURIComponent(id));return Store.fetchSb()}
   c.items=c.items.filter(x=>x.id!==id);lsSet('pg_'+k,c.items);changed();
@@ -646,7 +647,7 @@ function buildSample(){
 }
 
 /* =================== Seleccion de datos =================== */
-const all=k=>S.sample?Store.list(k).concat(SAMPLE[k]):Store.list(k);
+const all=k=>Store.list(k);
 const tsOf=(k,r)=>k==='obras'&&r.fecha?Date.parse(r.fecha+'T12:00:00'):r.createdAt||0;
 const bidOf=r=>idByName[r.barrio]??null;
 const subKey=(k,r)=>k==='puntos'?r.tipo:(r.estado||'pendiente');
@@ -691,7 +692,44 @@ function applyView(){
   const m=NICE.find(n=>n/k>=70)||2000;
   $('#sbar').style.width=Math.round(m/k)+'px';$('#stxt').textContent=m>=1000?(m/1000)+' km':m+' m';
   $('#sScale').textContent='1:'+nf.format(Math.round(k/0.0002645833/50)*50);
-  placePop();
+  placePop();scheduleBase();
+}
+
+/* =================== Imagen de fondo (calles reales / satelite) =================== */
+const TILE_SRC={
+  street:(x,y,z)=>`https://tile.openstreetmap.org/${z}/${x}/${y}.png`,
+  sat:(x,y,z)=>`https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`
+};
+const tileN=z=>Math.pow(2,z);
+const lon2x=(lo,z)=>Math.floor((lo+180)/360*tileN(z));
+const lat2y=(la,z)=>{const r=Math.max(Math.min(la,85.05),-85.05)*Math.PI/180;return Math.floor((1-Math.log(Math.tan(r)+1/Math.cos(r))/Math.PI)/2*tileN(z))};
+const x2lon=(x,z)=>x/tileN(z)*360-180;
+const y2lat=(y,z)=>{const n=Math.PI-2*Math.PI*y/tileN(z);return 180/Math.PI*Math.atan(0.5*(Math.exp(n)-Math.exp(-n)))};
+let baseT=0;
+function scheduleBase(){
+  if(S.basemap==='none'){if(L.base)L.base.innerHTML='';return}
+  clearTimeout(baseT);baseT=setTimeout(drawBaseTiles,160);
+}
+function drawBaseTiles(){
+  if(S.basemap==='none'){L.base.innerHTML='';return}
+  const d=dims(),k=view.w/d.W,h=k*d.H;
+  const mres=156543.03392*Math.cos(LAT0*Math.PI/180);
+  let z=Math.max(3,Math.min(19,Math.round(Math.log2(mres/k))));
+  const nw=U(view.cx-view.w/2,view.cy-h/2),se=U(view.cx+view.w/2,view.cy+h/2);
+  const calc=zz=>{let x0=lon2x(nw[0],zz),x1=lon2x(se[0],zz),y0=lat2y(nw[1],zz),y1=lat2y(se[1],zz);
+    if(x1<x0)[x0,x1]=[x1,x0];if(y1<y0)[y0,y1]=[y1,y0];return[x0-1,x1+1,y0-1,y1+1]};
+  let[x0,x1,y0,y1]=calc(z);
+  while((x1-x0+1)*(y1-y0+1)>90&&z>3){z--;[x0,x1,y0,y1]=calc(z)}
+  const n=tileN(z),frag=document.createDocumentFragment();
+  for(let ty=Math.max(0,y0);ty<=Math.min(n-1,y1);ty++){
+    const latN=y2lat(ty,z),latS=y2lat(ty+1,z);
+    for(let tx=x0;tx<=x1;tx++){
+      const txw=((tx%n)+n)%n,lonW=x2lon(txw,z),lonE=x2lon(txw+1,z);
+      const p0=P(lonW,latN),p1=P(lonE,latS);
+      el('image',{href:TILE_SRC[S.basemap](txw,ty,z),x:f1(p0[0]),y:f1(p0[1]),width:f1(Math.max(p1[0]-p0[0],.01)),height:f1(Math.max(p1[1]-p0[1],.01)),preserveAspectRatio:'none','class':'tile'},frag);
+    }
+  }
+  L.base.innerHTML='';L.base.appendChild(frag);
 }
 let raf=0;
 function flyTo(t,ms){
@@ -712,7 +750,7 @@ const center=()=>{const d=dims();return[d.r.left+d.W/2,d.r.top+d.H/2]};
 const defs=el('defs',{},svg);
 defs.innerHTML=Object.entries(GLYPH).map(([k,v])=>`<g id="gl-${k}">${v}</g>`).join('');
 const L={};
-['manz','streets','heat','bmask','barrios','plat','hi','snames','blabels','equip','inc','obras','reports','puntos','pin'].forEach(n=>L[n]=el('g',{'data-layer':n},svg));
+['base','manz','streets','heat','bmask','barrios','plat','hi','snames','blabels','equip','inc','obras','reports','puntos','pin'].forEach(n=>L[n]=el('g',{'data-layer':n},svg));
 const platD=pathD(D.platform,D.ptype);
 manz.forEach(m=>{m.el=el('path',{'class':'blk',d:m.d,'data-m':m.i},L.manz)});
 el('path',{'class':'plat2',d:platD},L.plat);el('path',{'class':'plat',d:platD},L.plat);
@@ -855,7 +893,10 @@ function renderTree(){
   }
   const ramp=S.manzMode==='pob'?`<div class="ramp" aria-label="Habitantes por manzana">${['0','1–24','25–49','50–99','100–199','200+'].map((t,i)=>`<span style="--c:var(--q${i})">${t}</span>`).join('')}</div>`:'';
   const rodLeg=S.streetMode==='rod'?`<div class="ramp" style="flex-wrap:wrap;gap:4px 8px">${ROD.filter(x=>segs.some(s=>s.r===x&&s.m>0)).map(x=>`<span style="--c:${ROD_C[x]};flex:0 0 auto;min-width:48px">${x}</span>`).join('')}</div>`:'';
-  h+=`<div class="sec"><div class="lab">Base cartográfica<small>Censo 2022 · catastro vial</small></div>`
+  const baseAttr=S.basemap==='sat'?'Imagen: Esri, Maxar, Earthstar Geographics':S.basemap==='street'?'Mapa: © colaboradores de OpenStreetMap':'';
+  h+=`<div class="sec"><div class="lab">Base cartográfica<small>Censo 2022 · catastro vial</small></div>
+   <div class="opt"><span>Imagen de fondo</span><select data-opt="basemap" aria-label="Imagen de fondo"><option value="none"${S.basemap==='none'?' selected':''}>Ninguna (mapa dibujado)</option><option value="street"${S.basemap==='street'?' selected':''}>Calles reales</option><option value="sat"${S.basemap==='sat'?' selected':''}>Satélite</option></select></div>
+   ${baseAttr?`<div class="opt" style="padding-top:0;font-size:10.5px;color:var(--ink-3)">${baseAttr}</div>`:''}`
    +layerRow('streets','Calles',swLine('var(--r-asf)'),streetNames.length,{title:'Calles con nombre dentro de la plataforma',extra:S.on.streets?`<div class="opt"><span>Color</span><select data-opt="streetMode" aria-label="Color de calles"><option value="rod"${S.streetMode==='rod'?' selected':''}>Capa de rodadura</option><option value="tip"${S.streetMode==='tip'?' selected':''}>Jerarquía vial</option><option value="none"${S.streetMode==='none'?' selected':''}>Sin color</option></select></div>${rodLeg}`:''})
    +layerRow('snames','Nombres de calles',`<svg class="sw" viewBox="0 0 18 18" aria-hidden="true"><text x="9" y="13" text-anchor="middle" font-size="11" font-weight="700" fill="var(--ink-2)" font-family="Barlow Condensed,sans-serif">Ab</text></svg>`,null,{dis:!S.on.streets})
    +layerRow('barrios','Barrios',swFill('none','var(--ink-3)'),barrios.length)
@@ -884,7 +925,7 @@ $('#tree').addEventListener('change',e=>{
     if(t.dataset.ly==='heat'||t.dataset.ly==='puntos'||t.dataset.ly==='inc')inval(F.HEAT);
     inval(F.BASE|F.MARK|F.TREE);if(S.sel&&!S.on[S.sel.kind])closePop();return}
   if(t.dataset.sub){const s=S.hide[t.dataset.sub];t.checked?s.delete(t.dataset.key):s.add(t.dataset.key);if(!t.checked)S.on[t.dataset.sub]=true;filtersChanged();return}
-  if(t.dataset.opt){S[t.dataset.opt]=t.value;inval(t.dataset.opt==='heatSrc'?F.HEAT|F.TREE:F.BASE|F.TREE);return}
+  if(t.dataset.opt){S[t.dataset.opt]=t.value;if(t.dataset.opt==='basemap'){svg.classList.toggle('has-base',S.basemap!=='none');scheduleBase()}inval(t.dataset.opt==='heatSrc'?F.HEAT|F.TREE:F.BASE|F.TREE);return}
   if(t.id==='fBarrio'){setBarrio(t.value===''?null:+t.value)}
 });
 $('#tree').addEventListener('click',e=>{
@@ -934,7 +975,7 @@ function renderStats(){
   const open=(cr.pendiente||0)+(cr.publicado||0)+(cr.en_atencion||0);
   const pAct=Pr.filter(x=>x.estado==='pendiente'||x.estado==='verificado').length,pPend=Pr.filter(x=>x.estado==='pendiente').length;
   const nAct=activeFilters();
-  let h=`<div class="scope"><h2>${sc?esc(nm(sc.nombre)):'Toda la plataforma'}</h2><p>${S.period==='all'?'Todo el periodo':'Últimos '+PERIODS[S.period][0]}${nAct?` · ${nAct} filtro${nAct>1?'s':''} activo${nAct>1?'s':''} · <button type="button" data-act="clear">Limpiar</button>`:''}${S.sample?' · <b>datos de ejemplo</b>':''}</p></div>`;
+  let h=`<div class="scope"><h2>${sc?esc(nm(sc.nombre)):'Toda la plataforma'}</h2><p>${S.period==='all'?'Todo el periodo':'Últimos '+PERIODS[S.period][0]}${nAct?` · ${nAct} filtro${nAct>1?'s':''} activo${nAct>1?'s':''} · <button type="button" data-act="clear">Limpiar</button>`:''}</p></div>`;
   h+=`<div class="kpis">
     <div class="kpi"><div class="kl">Habitantes</div><div class="kv">${nf.format(pop.population_total)}</div><div class="ks">${nf1.format(pop.population_total/area)} hab/ha · ${nf.format(pop.manzanas)} manzanas</div></div>
     <div class="kpi"><div class="kl">Obras</div><div class="kv">${nf.format(O.length)}</div><div class="ks">${co.ejecutada||0} ejecutadas · ${co.ejecucion||0} en curso</div></div>
@@ -1351,13 +1392,6 @@ function togglePanel(which){app.classList.contains('show-'+which)?(app.classList
 function syncPanelBtns(){$('#tLeft').setAttribute('aria-pressed',app.classList.contains('show-left'));$('#tRight').setAttribute('aria-pressed',app.classList.contains('show-right'));$('#top').style.setProperty('--toph',$('#top').offsetHeight+'px');app.style.setProperty('--toph',$('#top').offsetHeight+'px')}
 $('#tLeft').onclick=()=>togglePanel('left');$('#tRight').onclick=()=>togglePanel('right');
 $$('[data-close]').forEach(b=>b.onclick=()=>{app.classList.remove('show-'+b.dataset.close);syncPanelBtns()});
-function setSample(on){
-  S.sample=on;if(on&&!SAMPLE.puntos.length)buildSample();
-  $('#tSample').setAttribute('aria-pressed',on);$('#banner').hidden=!on;
-  if(!on&&S.sel&&String(S.sel.id).startsWith('ej-'))closePop();
-  filtersChanged();toast(on?'Mostrando datos de ejemplo. No se guardan.':'Datos de ejemplo quitados.');
-}
-$('#tSample').onclick=()=>setSample(!S.sample);$('#bannerX').onclick=()=>setSample(false);
 $('#bAuth').onclick=async()=>{if(Store.admin){await Store.logout();toast('Sesión técnica cerrada.');filtersChanged()}else formLogin()};
 function setBarrio(id,fromMap){
   S.barrio=id;closePop();
