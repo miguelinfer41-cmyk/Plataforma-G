@@ -192,6 +192,7 @@ button{cursor:pointer}
 .pop .pa{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:10px 0 0;padding:8px 12px;border-top:1px solid var(--rule);background:var(--paper-2);border-radius:0 0 7px 7px}
 .pop .pa select{height:28px;border:1px solid var(--rule-2);background:var(--paper);border-radius:4px;padding:0 6px;font-size:12.5px;flex:1;min-width:0}
 .pop .pbody{padding-bottom:12px}
+.pfoto{display:block;width:calc(100% - 24px);max-height:160px;object-fit:cover;border-radius:7px;margin:8px 12px 0;border:1px solid var(--rule)}
 .pop .pbody:has(+.pa){padding-bottom:0}
 .x{position:absolute;top:5px;right:5px;width:26px;height:26px;border:0;background:none;color:var(--ink-3);font-size:18px;line-height:1;border-radius:4px}
 .x:hover{background:var(--paper-2)}
@@ -529,17 +530,17 @@ const ssSet=(k,v)=>{try{v==null?sessionStorage.removeItem(k):sessionStorage.setI
 const uuid=()=>(window.crypto&&crypto.randomUUID)?crypto.randomUUID():'x'+Date.now().toString(36)+Math.random().toString(36).slice(2,10);
 const COLS={
   reports:{key:'reports',table:'reportes',items:[],
-    sel:'id,tipo,descripcion,barrio,lat,lon,estado,created_at',
-    to:o=>({id:o.id,tipo:o.tipo,descripcion:o.desc,barrio:o.barrio,lat:o.lat,lon:o.lon}),
-    from:x=>({id:x.id,tipo:x.tipo,desc:x.descripcion,barrio:x.barrio,lat:x.lat,lon:x.lon,estado:x.estado,createdAt:Date.parse(x.created_at)})},
+    sel:'id,tipo,descripcion,barrio,lat,lon,estado,foto_url,created_at',
+    to:o=>({id:o.id,tipo:o.tipo,descripcion:o.desc,barrio:o.barrio,lat:o.lat,lon:o.lon,foto_url:o.foto||null}),
+    from:x=>({id:x.id,tipo:x.tipo,desc:x.descripcion,barrio:x.barrio,lat:x.lat,lon:x.lon,estado:x.estado,foto:x.foto_url,createdAt:Date.parse(x.created_at)})},
   obras:{key:'obras',table:'obras',items:[],
     sel:'id,titulo,barrio,estado,fecha,descripcion,lat,lon,created_at',
     to:o=>({id:o.id,titulo:o.titulo,barrio:o.barrio,estado:o.estado,fecha:o.fecha||null,descripcion:o.desc,lat:o.lat,lon:o.lon}),
     from:x=>({id:x.id,titulo:x.titulo,barrio:x.barrio,estado:x.estado,fecha:x.fecha,desc:x.descripcion,lat:x.lat,lon:x.lon,createdAt:Date.parse(x.created_at)})},
   puntos:{key:'puntos',table:'puntos_rojos',items:[],
-    sel:'id,tipo,establecimiento,calle,barrio,descripcion,dias,franja,reportante,lat,lon,estado,ip,created_at',
-    to:o=>({id:o.id,tipo:o.tipo,establecimiento:o.local||null,calle:o.calle||null,barrio:o.barrio,descripcion:o.desc||null,dias:o.dias,franja:o.franja||null,reportante:o.reportante,lat:o.lat,lon:o.lon}),
-    from:x=>({id:x.id,tipo:x.tipo,local:x.establecimiento,calle:x.calle,barrio:x.barrio,desc:x.descripcion,dias:x.dias||[],franja:x.franja,reportante:x.reportante,lat:x.lat,lon:x.lon,estado:x.estado,ip:x.ip,createdAt:Date.parse(x.created_at)})}
+    sel:'id,tipo,establecimiento,calle,barrio,descripcion,dias,franja,reportante,lat,lon,estado,ip,foto_url,created_at',
+    to:o=>({id:o.id,tipo:o.tipo,establecimiento:o.local||null,calle:o.calle||null,barrio:o.barrio,descripcion:o.desc||null,dias:o.dias,franja:o.franja||null,reportante:o.reportante,lat:o.lat,lon:o.lon,foto_url:o.foto||null}),
+    from:x=>({id:x.id,tipo:x.tipo,local:x.establecimiento,calle:x.calle,barrio:x.barrio,desc:x.descripcion,dias:x.dias||[],franja:x.franja,reportante:x.reportante,lat:x.lat,lon:x.lon,estado:x.estado,ip:x.ip,foto:x.foto_url,createdAt:Date.parse(x.created_at)})}
 };
 const Store={mode:'local',admin:false,canWrite:true,uid:null,token:null,db:null,synced:0};
 const mineOf=k=>lsGet('pg_mis_'+k,[]);
@@ -598,6 +599,19 @@ Store.logout=async()=>{Store.token=null;Store.admin=false;ssSet('pg_tok',null);s
 async function sbWrite(method,c,q,body){
   const r=await fetch(`${SUPABASE_URL}/rest/v1/${c.table}${q}`,{method,headers:Object.assign(sbH(),{Prefer:'return=minimal'}),body:body?JSON.stringify(body):undefined});
   if(!r.ok)throw new Error('http '+r.status);
+}
+const FOTO_MAX=5*1024*1024;
+async function uploadFoto(file){
+  if(!file)return null;
+  if(!/^image\//.test(file.type))throw new Error('Adjunta una imagen (foto).');
+  if(file.size>FOTO_MAX)throw new Error('La foto pesa demasiado (máximo 5 MB).');
+  const ext=(file.name.split('.').pop()||'jpg').toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,8)||'jpg';
+  const path=uuid()+'.'+ext;
+  let r;
+  try{r=await fetch(`${SUPABASE_URL}/storage/v1/object/fotos/${path}`,{method:'POST',headers:{apikey:SUPABASE_KEY,Authorization:'Bearer '+(Store.token||SUPABASE_KEY),'Content-Type':file.type},body:file})}
+  catch(e){throw new Error('No se pudo subir la foto. Revisa tu conexión e inténtalo otra vez.')}
+  if(!r.ok)throw new Error('No se pudo subir la foto.');
+  return `${SUPABASE_URL}/storage/v1/object/public/fotos/${path}`;
 }
 Store.add=async(k,o)=>{
   const c=COLS[k];
@@ -1078,9 +1092,10 @@ function popHtml(k,r){
   if(k==='inc')add('Fuente','Estudio de videovigilancia 2026');
   if(k!=='inc'&&k!=='equip')add(k==='obras'?'Publicado':'Recibido',`<span class="num">${esc(fdt(r.createdAt))}</span>`);
   const desc=r.desc?`<p>${esc(r.desc)}</p>`:'';
+  const foto=r.foto?`<a href="${esc(r.foto)}" target="_blank" rel="noopener"><img class="pfoto" src="${esc(r.foto)}" alt="Foto adjunta al registro" loading="lazy"></a>`:'';
   const canAdmin=Store.admin&&!r.ejemplo&&EST[k]&&Store.mode!=='none';
   const adm=canAdmin?`<div class="pa"><select data-pop-est aria-label="Cambiar estado">${Object.entries(EST[k]).map(([v,l])=>`<option value="${v}"${v===(r.estado||'pendiente')?' selected':''}>${l}</option>`).join('')}</select><button type="button" class="mini danger" data-pop-del>Eliminar</button></div>`:'';
-  return`<button type="button" class="x" data-pop-x aria-label="Cerrar">&times;</button><div class="pbody"><div class="ph">${sw(gkey(k,r),'')}${KIND[k]}${r.ejemplo?' · ejemplo':''}</div><h3>${esc(titleOf(k,r))}</h3><dl>${dl.join('')}</dl>${desc}</div>${adm}`;
+  return`<button type="button" class="x" data-pop-x aria-label="Cerrar">&times;</button><div class="pbody"><div class="ph">${sw(gkey(k,r),'')}${KIND[k]}${r.ejemplo?' · ejemplo':''}</div><h3>${esc(titleOf(k,r))}</h3>${foto}<dl>${dl.join('')}</dl>${desc}</div>${adm}`;
 }
 function openPop(k,id){
   const r=findRec(k,id);if(!r)return closePop();
@@ -1172,17 +1187,20 @@ function formReporte(){
   <form id="fRp" novalidate>${whereHtml(pt)}
   <label class="f" for="rTipo">Tipo de problema<select id="rTipo">${optsOf(TIPOS_REP)}</select></label>
   <label class="f" for="rDesc">¿Qué ocurre?<textarea id="rDesc" maxlength="400" placeholder="Ejemplo: hueco grande en la esquina desde hace dos semanas."></textarea></label>
+  ${Store.mode==='supabase'?`<label class="f" for="rFoto">Foto (opcional)<input type="file" id="rFoto" accept="image/*" capture="environment"></label>`:''}
   <div class="hp" aria-hidden="true"><label>No llenar<input id="rWeb" tabindex="-1" autocomplete="off"></label></div>
   ${actsHtml('r','Enviar reporte')}</form>`);
   $('#fRp').addEventListener('submit',async e=>{
     e.preventDefault();const err=$('#rErr');err.textContent='';if($('#rWeb').value)return;
-    const tipo=$('#rTipo').value,desc=$('#rDesc').value.trim(),q=quota();
+    const tipo=$('#rTipo').value,desc=$('#rDesc').value.trim(),q=quota(),fIn=$('#rFoto'),fFile=fIn&&fIn.files[0];
     if(!tipo)return void(err.textContent='Elige el tipo de problema.');
     if(desc.length<10)return void(err.textContent='Describe el problema con al menos 10 caracteres.');
     if(q.n>=MAX_DIARIO)return void(err.textContent=`Llegaste al máximo de ${MAX_DIARIO} reportes por día desde este dispositivo.`);
-    const o={id:uuid(),tipo,desc,barrio:pt.barrio.nombre,lat:+pt.lat.toFixed(6),lon:+pt.lon.toFixed(6),estado:'pendiente',createdAt:Date.now()};
-    if(Store.uid)o.uid=Store.uid;
     $('#rSend').disabled=true;
+    let foto=null;
+    if(fFile){try{foto=await uploadFoto(fFile)}catch(fx){err.textContent=fx.message||'No se pudo subir la foto.';$('#rSend').disabled=false;return}}
+    const o={id:uuid(),tipo,desc,barrio:pt.barrio.nombre,lat:+pt.lat.toFixed(6),lon:+pt.lon.toFixed(6),foto,estado:'pendiente',createdAt:Date.now()};
+    if(Store.uid)o.uid=Store.uid;
     try{remember('reports',o);await Store.add('reports',o);bumpQuota(q);closeModal();toast('Reporte enviado. Aparecerá cuando un técnico lo revise.')}
     catch(x){err.textContent='No se pudo enviar. Revisa tu conexión e inténtalo otra vez.';$('#rSend').disabled=false}
   });
@@ -1197,6 +1215,7 @@ function formRojo(){
   <fieldset style="border:0;padding:0;margin:0"><legend style="font-weight:600;font-size:13.5px;margin-bottom:5px">Días en que ocurre</legend><div class="days">${DIAS.map((d,i)=>`<label><input type="checkbox" name="dia" value="${d}"><span title="${DIAS_L[i]}">${d}</span></label>`).join('')}</div></fieldset>
   <label class="f" for="pFr">Horario<select id="pFr"><option value="">Sin indicar</option>${FRANJAS.map(t=>`<option>${t}</option>`).join('')}</select></label>
   <label class="f" for="pDesc">Detalles (opcional)<textarea id="pDesc" maxlength="300" placeholder="Qué se vende o qué pasa, desde cuándo."></textarea></label>
+  ${Store.mode==='supabase'?`<label class="f" for="pFoto">Foto (opcional)<input type="file" id="pFoto" accept="image/*" capture="environment"></label>`:''}
   <label class="f" for="pNom">Tu nombre<input type="text" id="pNom" maxlength="80" autocomplete="name"></label>
   <label class="chk" for="pOk"><input type="checkbox" id="pOk"><span>Autorizo que se registren mi nombre, la hora del reporte y mi dirección IP para verificar que el reporte es real. Solo los ve el equipo técnico.</span></label>
   <p class="fine">${ipTxt}</p>
@@ -1204,15 +1223,17 @@ function formRojo(){
   ${actsHtml('p','Enviar punto rojo','red')}</form>`);
   $('#fRj').addEventListener('submit',async e=>{
     e.preventDefault();const err=$('#pErr');err.textContent='';if($('#pWeb').value)return;
-    const tipo=$('#pTipo').value,dias=$$('input[name=dia]:checked').map(x=>x.value),nom=$('#pNom').value.trim(),q=quota();
+    const tipo=$('#pTipo').value,dias=$$('input[name=dia]:checked').map(x=>x.value),nom=$('#pNom').value.trim(),q=quota(),fIn=$('#pFoto'),fFile=fIn&&fIn.files[0];
     if(!tipo)return void(err.textContent='Elige el tipo de punto rojo.');
     if(!dias.length)return void(err.textContent='Marca al menos un día en que ocurre.');
     if(nom.length<3)return void(err.textContent='Escribe tu nombre.');
     if(!$('#pOk').checked)return void(err.textContent='Debes autorizar el registro de tus datos para enviar el reporte.');
     if(q.n>=MAX_DIARIO)return void(err.textContent=`Llegaste al máximo de ${MAX_DIARIO} reportes por día desde este dispositivo.`);
-    const o={id:uuid(),tipo,local:$('#pLocal').value.trim(),calle:$('#pCalle').value.trim(),barrio:pt.barrio.nombre,desc:$('#pDesc').value.trim(),dias,franja:$('#pFr').value,reportante:nom,lat:+pt.lat.toFixed(6),lon:+pt.lon.toFixed(6),estado:'pendiente',createdAt:Date.now()};
-    if(Store.uid)o.uid=Store.uid;
     $('#pSend').disabled=true;
+    let foto=null;
+    if(fFile){try{foto=await uploadFoto(fFile)}catch(fx){err.textContent=fx.message||'No se pudo subir la foto.';$('#pSend').disabled=false;return}}
+    const o={id:uuid(),tipo,local:$('#pLocal').value.trim(),calle:$('#pCalle').value.trim(),barrio:pt.barrio.nombre,desc:$('#pDesc').value.trim(),dias,franja:$('#pFr').value,reportante:nom,lat:+pt.lat.toFixed(6),lon:+pt.lon.toFixed(6),foto,estado:'pendiente',createdAt:Date.now()};
+    if(Store.uid)o.uid=Store.uid;
     try{const {reportante,...own}=o;remember('puntos',own);await Store.add('puntos',o);bumpQuota(q);S.on.puntos=true;closeModal();toast('Punto rojo enviado. El equipo técnico lo verificará.')}
     catch(x){err.textContent='No se pudo enviar. Revisa tu conexión e inténtalo otra vez.';$('#pSend').disabled=false}
   });
@@ -1251,9 +1272,9 @@ async function exportCsv(k){
   const q=v=>'"'+String(v==null?'':v).replace(/"/g,'""')+'"';
   const list=rows(k).filter(r=>!r.ejemplo);
   const spec={
-    reports:[['fecha_hora',r=>new Date(r.createdAt).toISOString()],['tipo',r=>r.tipo],['barrio',r=>nm(r.barrio)],['descripcion',r=>r.desc],['estado',r=>EST.reports[r.estado]||r.estado],['lat',r=>r.lat],['lon',r=>r.lon]],
+    reports:[['fecha_hora',r=>new Date(r.createdAt).toISOString()],['tipo',r=>r.tipo],['barrio',r=>nm(r.barrio)],['descripcion',r=>r.desc],['estado',r=>EST.reports[r.estado]||r.estado],['foto',r=>r.foto],['lat',r=>r.lat],['lon',r=>r.lon]],
     obras:[['titulo',r=>r.titulo],['barrio',r=>nm(r.barrio)],['estado',r=>EST.obras[r.estado]],['fecha',r=>r.fecha],['descripcion',r=>r.desc],['lat',r=>r.lat],['lon',r=>r.lon]],
-    puntos:[['fecha_hora',r=>new Date(r.createdAt).toISOString()],['tipo',r=>r.tipo],['establecimiento',r=>r.local],['calle',r=>r.calle],['barrio',r=>nm(r.barrio)],['dias',r=>(r.dias||[]).join(' ')],['horario',r=>r.franja],['detalles',r=>r.desc],['reportante',r=>r.reportante],['ip',r=>r.ip],['estado',r=>EST.puntos[r.estado]||r.estado],['lat',r=>r.lat],['lon',r=>r.lon],['utm_e',r=>Math.round(utm17s(r.lon,r.lat)[0])],['utm_n',r=>Math.round(utm17s(r.lon,r.lat)[1])]]
+    puntos:[['fecha_hora',r=>new Date(r.createdAt).toISOString()],['tipo',r=>r.tipo],['establecimiento',r=>r.local],['calle',r=>r.calle],['barrio',r=>nm(r.barrio)],['dias',r=>(r.dias||[]).join(' ')],['horario',r=>r.franja],['detalles',r=>r.desc],['reportante',r=>r.reportante],['ip',r=>r.ip],['foto',r=>r.foto],['estado',r=>EST.puntos[r.estado]||r.estado],['lat',r=>r.lat],['lon',r=>r.lon],['utm_e',r=>Math.round(utm17s(r.lon,r.lat)[0])],['utm_n',r=>Math.round(utm17s(r.lon,r.lat)[1])]]
   }[k];
   if(!list.length)return toast('No hay registros reales para descargar con estos filtros.');
   const text=[spec.map(s=>s[0]).join(',')].concat(list.map(r=>spec.map(s=>q(s[1](r))).join(','))).join('\n');
