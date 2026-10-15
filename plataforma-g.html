@@ -2,6 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://ntoxrzbfrbscbusgmcpp.supabase.co https://tile.openstreetmap.org https://server.arcgisonline.com; connect-src https://ntoxrzbfrbscbusgmcpp.supabase.co; base-uri 'none'; form-action 'none'; object-src 'none'">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Plataforma G Riobamba</title>
 <meta name="claude:viewport-fit-sides" content="cover">
@@ -601,6 +602,8 @@ async function sbWrite(method,c,q,body){
   if(!r.ok)throw new Error('http '+r.status);
 }
 const FOTO_MAX=5*1024*1024;
+const FOTO_BASE=SUPABASE_URL+'/storage/v1/object/public/fotos/';
+const safeFoto=u=>(SUPABASE_URL&&typeof u==='string'&&u.startsWith(FOTO_BASE)&&!/["'<>\s]/.test(u))?u:null;  // solo fotos de nuestro bucket
 async function uploadFoto(file){
   if(!file)return null;
   if(!/^image\//.test(file.type))throw new Error('Adjunta una imagen (foto).');
@@ -1092,7 +1095,7 @@ function popHtml(k,r){
   if(k==='inc')add('Fuente','Estudio de videovigilancia 2026');
   if(k!=='inc'&&k!=='equip')add(k==='obras'?'Publicado':'Recibido',`<span class="num">${esc(fdt(r.createdAt))}</span>`);
   const desc=r.desc?`<p>${esc(r.desc)}</p>`:'';
-  const foto=r.foto?`<a href="${esc(r.foto)}" target="_blank" rel="noopener"><img class="pfoto" src="${esc(r.foto)}" alt="Foto adjunta al registro" loading="lazy"></a>`:'';
+  const fu=safeFoto(r.foto),foto=fu?`<a href="${esc(fu)}" target="_blank" rel="noopener noreferrer"><img class="pfoto" referrerpolicy="no-referrer" src="${esc(fu)}" alt="Foto adjunta al registro" loading="lazy"></a>`:'';
   const canAdmin=Store.admin&&!r.ejemplo&&EST[k]&&Store.mode!=='none';
   const adm=canAdmin?`<div class="pa"><select data-pop-est aria-label="Cambiar estado">${Object.entries(EST[k]).map(([v,l])=>`<option value="${v}"${v===(r.estado||'pendiente')?' selected':''}>${l}</option>`).join('')}</select><button type="button" class="mini danger" data-pop-del>Eliminar</button></div>`:'';
   return`<button type="button" class="x" data-pop-x aria-label="Cerrar">&times;</button><div class="pbody"><div class="ph">${sw(gkey(k,r),'')}${KIND[k]}${r.ejemplo?' · ejemplo':''}</div><h3>${esc(titleOf(k,r))}</h3>${foto}<dl>${dl.join('')}</dl>${desc}</div>${adm}`;
@@ -1269,7 +1272,7 @@ function formLogin(){
 
 /* =================== CSV =================== */
 async function exportCsv(k){
-  const q=v=>'"'+String(v==null?'':v).replace(/"/g,'""')+'"';
+  const q=v=>{let t=String(v==null?'':v);if(typeof v==='string'&&/^[=+\-@\t\r]/.test(t))t="'"+t;return '"'+t.replace(/"/g,'""')+'"'};  // evita formulas en Excel
   const list=rows(k).filter(r=>!r.ejemplo);
   const spec={
     reports:[['fecha_hora',r=>new Date(r.createdAt).toISOString()],['tipo',r=>r.tipo],['barrio',r=>nm(r.barrio)],['descripcion',r=>r.desc],['estado',r=>EST.reports[r.estado]||r.estado],['foto',r=>r.foto],['lat',r=>r.lat],['lon',r=>r.lon]],
