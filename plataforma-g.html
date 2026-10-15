@@ -546,7 +546,7 @@ const COLS={
 const Store={mode:'local',admin:false,canWrite:true,uid:null,token:null,db:null,synced:0};
 const mineOf=k=>lsGet('pg_mis_'+k,[]);
 const isMine=(k,r)=>(Store.uid&&r.uid===Store.uid)||mineOf(k).some(m=>m.id===r.id);
-const remember=(k,o)=>{const m=mineOf(k);m.push(o);lsSet('pg_mis_'+k,m.slice(-80))};
+const remember=(k,o)=>{const m=mineOf(k).filter(x=>x.id!==o.id);m.push(o);lsSet('pg_mis_'+k,m.slice(-80))};
 Store.list=k=>{
   const c=COLS[k];let all=c.items;
   if(Store.mode==='supabase'&&k!=='obras'){const own=mineOf(k).filter(m=>!all.some(x=>x.id===m.id));if(own.length)all=own.concat(all)}
@@ -619,7 +619,10 @@ async function uploadFoto(file){
 Store.add=async(k,o)=>{
   const c=COLS[k];
   if(Store.mode==='db')return Store.db.collection(k).doc(o.id).set(o);
-  if(Store.mode==='supabase'){await sbWrite('POST',c,'',c.to(o));if(Store.admin)await Store.fetchSb();else changed();return}
+  if(Store.mode==='supabase'){
+    try{await sbWrite('POST',c,'',c.to(o))}catch(e){if(!/http 409/.test(e.message))throw e}   // 409 = ya se habia guardado (reintento): no duplicar
+    try{if(Store.admin)await Store.fetchSb();else changed()}catch(e){}   // un fallo al refrescar no es un fallo al guardar
+    return}
   c.items=[o].concat(c.items);lsSet('pg_'+k,c.items);changed();
 };
 Store.patch=async(k,id,patch)=>{
@@ -1193,6 +1196,7 @@ function formReporte(){
   ${Store.mode==='supabase'?`<label class="f" for="rFoto">Foto (opcional)<input type="file" id="rFoto" accept="image/*" capture="environment"></label>`:''}
   <div class="hp" aria-hidden="true"><label>No llenar<input id="rWeb" tabindex="-1" autocomplete="off"></label></div>
   ${actsHtml('r','Enviar reporte')}</form>`);
+  let fotoOk=null;const newId=uuid();   // mismo id y misma foto si hay que reintentar
   $('#fRp').addEventListener('submit',async e=>{
     e.preventDefault();const err=$('#rErr');err.textContent='';if($('#rWeb').value)return;
     const tipo=$('#rTipo').value,desc=$('#rDesc').value.trim(),q=quota(),fIn=$('#rFoto'),fFile=fIn&&fIn.files[0];
@@ -1200,12 +1204,12 @@ function formReporte(){
     if(desc.length<10)return void(err.textContent='Describe el problema con al menos 10 caracteres.');
     if(q.n>=MAX_DIARIO)return void(err.textContent=`Llegaste al máximo de ${MAX_DIARIO} reportes por día desde este dispositivo.`);
     $('#rSend').disabled=true;
-    let foto=null;
-    if(fFile){try{foto=await uploadFoto(fFile)}catch(fx){err.textContent=fx.message||'No se pudo subir la foto.';$('#rSend').disabled=false;return}}
-    const o={id:uuid(),tipo,desc,barrio:pt.barrio.nombre,lat:+pt.lat.toFixed(6),lon:+pt.lon.toFixed(6),foto,estado:'pendiente',createdAt:Date.now()};
+    let foto=fotoOk;
+    if(fFile&&!foto){try{foto=fotoOk=await uploadFoto(fFile)}catch(fx){err.textContent=fx.message||'No se pudo subir la foto.';$('#rSend').disabled=false;return}}
+    const o={id:newId,tipo,desc,barrio:pt.barrio.nombre,lat:+pt.lat.toFixed(6),lon:+pt.lon.toFixed(6),foto,estado:'pendiente',createdAt:Date.now()};
     if(Store.uid)o.uid=Store.uid;
     try{remember('reports',o);await Store.add('reports',o);bumpQuota(q);closeModal();toast('Reporte enviado. Aparecerá cuando un técnico lo revise.')}
-    catch(x){err.textContent='No se pudo enviar. Revisa tu conexión e inténtalo otra vez.';$('#rSend').disabled=false}
+    catch(x){err.textContent='No se pudo confirmar el envío. Pulsa de nuevo: si ya se había guardado, no se duplicará.';$('#rSend').disabled=false}
   });
 }
 function formRojo(){
@@ -1224,6 +1228,7 @@ function formRojo(){
   <p class="fine">${ipTxt}</p>
   <div class="hp" aria-hidden="true"><label>No llenar<input id="pWeb" tabindex="-1" autocomplete="off"></label></div>
   ${actsHtml('p','Enviar punto rojo','red')}</form>`);
+  let fotoOk=null;const newId=uuid();
   $('#fRj').addEventListener('submit',async e=>{
     e.preventDefault();const err=$('#pErr');err.textContent='';if($('#pWeb').value)return;
     const tipo=$('#pTipo').value,dias=$$('input[name=dia]:checked').map(x=>x.value),nom=$('#pNom').value.trim(),q=quota(),fIn=$('#pFoto'),fFile=fIn&&fIn.files[0];
@@ -1233,12 +1238,12 @@ function formRojo(){
     if(!$('#pOk').checked)return void(err.textContent='Debes autorizar el registro de tus datos para enviar el reporte.');
     if(q.n>=MAX_DIARIO)return void(err.textContent=`Llegaste al máximo de ${MAX_DIARIO} reportes por día desde este dispositivo.`);
     $('#pSend').disabled=true;
-    let foto=null;
-    if(fFile){try{foto=await uploadFoto(fFile)}catch(fx){err.textContent=fx.message||'No se pudo subir la foto.';$('#pSend').disabled=false;return}}
-    const o={id:uuid(),tipo,local:$('#pLocal').value.trim(),calle:$('#pCalle').value.trim(),barrio:pt.barrio.nombre,desc:$('#pDesc').value.trim(),dias,franja:$('#pFr').value,reportante:nom,lat:+pt.lat.toFixed(6),lon:+pt.lon.toFixed(6),foto,estado:'pendiente',createdAt:Date.now()};
+    let foto=fotoOk;
+    if(fFile&&!foto){try{foto=fotoOk=await uploadFoto(fFile)}catch(fx){err.textContent=fx.message||'No se pudo subir la foto.';$('#pSend').disabled=false;return}}
+    const o={id:newId,tipo,local:$('#pLocal').value.trim(),calle:$('#pCalle').value.trim(),barrio:pt.barrio.nombre,desc:$('#pDesc').value.trim(),dias,franja:$('#pFr').value,reportante:nom,lat:+pt.lat.toFixed(6),lon:+pt.lon.toFixed(6),foto,estado:'pendiente',createdAt:Date.now()};
     if(Store.uid)o.uid=Store.uid;
     try{const {reportante,...own}=o;remember('puntos',own);await Store.add('puntos',o);bumpQuota(q);S.on.puntos=true;closeModal();toast('Punto rojo enviado. El equipo técnico lo verificará.')}
-    catch(x){err.textContent='No se pudo enviar. Revisa tu conexión e inténtalo otra vez.';$('#pSend').disabled=false}
+    catch(x){err.textContent='No se pudo confirmar el envío. Pulsa de nuevo: si ya se había guardado, no se duplicará.';$('#pSend').disabled=false}
   });
 }
 function formObra(){
