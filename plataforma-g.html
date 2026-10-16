@@ -157,6 +157,8 @@ button{cursor:pointer}
 .rst{display:flex;justify-content:space-between;gap:8px;width:100%;border:0;background:none;padding:5px 6px;border-radius:7px;text-align:left;font-size:13px}
 .rst:hover{background:var(--paper-2)}
 .rst .num{color:var(--ink-3);font-size:12px;white-space:nowrap}
+.rst.sn span:first-child{color:var(--ink-2);font-style:italic}
+.rst small{font-style:normal;color:var(--ink-3)}
 
 /* ---------- Mapa ---------- */
 .mapwrap{grid-area:map;position:relative;min-width:0;min-height:0;overflow:hidden;background:var(--ground)}
@@ -1005,12 +1007,12 @@ function renderTree(){
     rodLeg=`<div class="rods" role="group" aria-label="Filtrar calles por capa de rodadura">${ROD.filter(x=>rodLen[x]).map(x=>`<button type="button" class="rchip" data-rod="${x}" aria-pressed="${S.rodSel.has(x)}"><i style="background:${ROD_C[x]}"></i>${x}<span class="num">${fmtL(rodLen[x])}</span></button>`).join('')}</div>`;
     if(!S.rodSel.size)rodLeg+=`<p class="note rnote">Toca un tipo para ver solo esas calles y su lista.</p>`;
     else{
-      const by={};let sinN=0,tot=0;
-      segs.forEach(s=>{if(inB(s)&&S.rodSel.has(s.r)){tot+=s.m;if(s.n)by[s.n]=(by[s.n]||0)+s.m;else sinN+=s.m}});
+      const by={},sinN={};let tot=0;
+      segs.forEach(s=>{if(inB(s)&&S.rodSel.has(s.r)){tot+=s.m;if(s.n)by[s.n]=(by[s.n]||0)+s.m;else{const k=s.b==null?'x':s.b;(sinN[k]=sinN[k]||{m:0,n:0});sinN[k].m+=s.m;sinN[k].n++}}});
       const ls=Object.entries(by).sort((a,b)=>b[1]-a[1]);
       rodLeg+=`<div class="rstreets"><p class="rsum"><b>${ls.length} calle${ls.length===1?'':'s'}</b> con ${[...S.rodSel].map(x=>x.toLowerCase()).join(' o ')}: ${fmtL(tot)}</p>`
         +ls.map(([n,m])=>`<button type="button" class="rst" data-rstreet="${esc(n)}"><span>${esc(n)}</span><span class="num">${fmtL(m)}</span></button>`).join('')
-        +(sinN?`<p class="note">Tramos sin nombre: ${fmtL(sinN)}</p>`:'')+`</div>`;
+        +Object.entries(sinN).sort((a,b)=>b[1].m-a[1].m).map(([k,v])=>`<button type="button" class="rst sn" data-rnoname="${k}"><span>Sin nombre, ${esc(k==='x'?'fuera de barrio':nm(byId[k].nombre))} <small>(${v.n} tramo${v.n===1?'':'s'})</small></span><span class="num">${fmtL(v.m)}</span></button>`).join('')+`</div>`;
     }
   }
   const baseAttr=S.basemap==='sat'?'Imagen: Esri, Maxar, Earthstar Geographics':S.basemap==='street'?'Mapa: © colaboradores de OpenStreetMap':'';
@@ -1056,6 +1058,7 @@ $('#tree').addEventListener('click',e=>{
   else if(b.dataset.pest){S.pEst.has(b.dataset.pest)?S.pEst.delete(b.dataset.pest):S.pEst.add(b.dataset.pest);filtersChanged()}
   else if(b.dataset.rod){const r=b.dataset.rod;S.rodSel.has(r)?S.rodSel.delete(r):S.rodSel.add(r);S.on.streets=true;inval(F.BASE|F.TREE)}
   else if(b.dataset.rstreet){const n=b.dataset.rstreet,g=segs.filter(s=>s.n===n&&s.m>0&&S.rodSel.has(s.r)&&(S.barrio==null||s.b===S.barrio));if(g.length)showStreet({n,segs:g,len:g.reduce((a,s)=>a+s.m,0)})}
+  else if(b.dataset.rnoname){const k=b.dataset.rnoname,g=segs.filter(s=>!s.n&&s.m>0&&S.rodSel.has(s.r)&&String(s.b==null?'x':s.b)===k&&(S.barrio==null||s.b===S.barrio));if(g.length)showStreet({n:'Tramos sin nombre'+(k==='x'?'':' en '+nm(byId[k].nombre)),segs:g,len:g.reduce((a,s)=>a+s.m,0)})}
   else if(b.dataset.act==='clear')clearFilters();
 });
 
