@@ -612,8 +612,25 @@ Store.fetchSb=async()=>{
     try{const r=await fetch(`${SUPABASE_URL}/rest/v1/${c.table}?select=${c.sel}&order=created_at.desc&limit=2000`,{headers:sbH()});
       if(r.ok)c.items=(await r.json()).map(c.from).filter(x=>x.id)}catch(e){}
   }));
+  if(!Store.admin)await syncMine();
   Store.synced=Date.now();changed();
 };
+// El vecino no puede leer las tablas (privacidad), pero si el estado de lo que el mismo envio:
+// el servidor responde solo id y estado de los identificadores que este navegador conoce.
+async function syncMine(){
+  const ok=m=>/^[0-9a-f-]{36}$/i.test(m.id),P=mineOf('puntos'),R=mineOf('reports');
+  const ip=P.filter(ok).map(m=>m.id).slice(-80),ir=R.filter(ok).map(m=>m.id).slice(-80);
+  if(!ip.length&&!ir.length)return;
+  try{
+    const r=await fetch(`${SUPABASE_URL}/rest/v1/rpc/estado_mios`,{method:'POST',headers:sbH(),body:JSON.stringify({p_puntos:ip,p_reportes:ir})});
+    if(!r.ok)return;
+    const st={};(await r.json()).forEach(x=>{st[x.tabla+':'+x.id]=x.estado});
+    const upd=(k,tab,list)=>lsSet('pg_mis_'+k,list
+      .filter(m=>!ok(m)||st[tab+':'+m.id]!==undefined||Date.now()-(m.createdAt||0)<120000)   // borrado por el tecnico: se quita
+      .map(m=>st[tab+':'+m.id]?Object.assign({},m,{estado:st[tab+':'+m.id]}):m));
+    upd('puntos','puntos',P);upd('reports','reportes',R);
+  }catch(e){}
+}
 Store.init=async()=>{
   if(window.claude&&window.claude.use){
     let db=null,u=null;
