@@ -1314,13 +1314,13 @@ function formReporte(){
     const tipo=$('#rTipo').value,desc=$('#rDesc').value.trim(),q=quota(),fIn=$('#rFoto'),fFile=fIn&&fIn.files[0];
     if(!tipo)return void(err.textContent='Elige el tipo de problema.');
     if(desc.length<10)return void(err.textContent='Describe el problema con al menos 10 caracteres.');
-    if(q.n>=MAX_DIARIO)return void(err.textContent=`Llegaste al máximo de ${MAX_DIARIO} reportes por día desde este dispositivo.`);
+    if(!Store.admin&&q.n>=MAX_DIARIO)return void(err.textContent=`Llegaste al máximo de ${MAX_DIARIO} reportes por día desde este dispositivo.`);
     $('#rSend').disabled=true;
     let foto=fotoOk;
     if(fFile&&!foto){try{foto=fotoOk=await uploadFoto(fFile)}catch(fx){err.textContent=fx.message||'No se pudo subir la foto.';$('#rSend').disabled=false;return}}
     const o={id:newId,tipo,desc,barrio:pt.barrio.nombre,lat:+pt.lat.toFixed(6),lon:+pt.lon.toFixed(6),foto,estado:'pendiente',createdAt:Date.now()};
     if(Store.uid)o.uid=Store.uid;
-    try{remember('reports',o);await Store.add('reports',o);bumpQuota(q);closeModal();toast('Reporte enviado. Aparecerá cuando un técnico lo revise.')}
+    try{remember('reports',o);await Store.add('reports',o);if(!Store.admin)bumpQuota(q);closeModal();toast('Reporte enviado. Aparecerá cuando un técnico lo revise.')}
     catch(x){err.textContent='No se pudo confirmar el envío. Pulsa de nuevo: si ya se había guardado, no se duplicará.';$('#rSend').disabled=false}
   });
 }
@@ -1348,13 +1348,13 @@ function formRojo(){
     if(!dias.length)return void(err.textContent='Marca al menos un día en que ocurre.');
     if(nom.length<3)return void(err.textContent='Escribe tu nombre.');
     if(!$('#pOk').checked)return void(err.textContent='Debes autorizar el registro de tus datos para enviar el reporte.');
-    if(q.n>=MAX_DIARIO)return void(err.textContent=`Llegaste al máximo de ${MAX_DIARIO} reportes por día desde este dispositivo.`);
+    if(!Store.admin&&q.n>=MAX_DIARIO)return void(err.textContent=`Llegaste al máximo de ${MAX_DIARIO} reportes por día desde este dispositivo.`);
     $('#pSend').disabled=true;
     let foto=fotoOk;
     if(fFile&&!foto){try{foto=fotoOk=await uploadFoto(fFile)}catch(fx){err.textContent=fx.message||'No se pudo subir la foto.';$('#pSend').disabled=false;return}}
     const o={id:newId,tipo,local:$('#pLocal').value.trim(),calle:$('#pCalle').value.trim(),barrio:pt.barrio.nombre,desc:$('#pDesc').value.trim(),dias,franja:$('#pFr').value,reportante:nom,lat:+pt.lat.toFixed(6),lon:+pt.lon.toFixed(6),foto,estado:'pendiente',createdAt:Date.now()};
     if(Store.uid)o.uid=Store.uid;
-    try{const {reportante,...own}=o;remember('puntos',own);await Store.add('puntos',o);bumpQuota(q);S.on.puntos=true;closeModal();toast('Punto rojo enviado. El equipo técnico lo verificará.')}
+    try{const {reportante,...own}=o;remember('puntos',own);await Store.add('puntos',o);if(!Store.admin)bumpQuota(q);S.on.puntos=true;closeModal();toast('Punto rojo enviado. El equipo técnico lo verificará.')}
     catch(x){err.textContent='No se pudo confirmar el envío. Pulsa de nuevo: si ya se había guardado, no se duplicará.';$('#pSend').disabled=false}
   });
 }
