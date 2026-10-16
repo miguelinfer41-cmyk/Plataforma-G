@@ -432,7 +432,7 @@ textarea{min-height:84px;resize:vertical}
       <button type="button" id="zr" aria-label="Encuadrar la plataforma" title="Encuadrar la plataforma (0)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 5V2h3M11 2h3v3M14 11v3h-3M5 14H2v-3"/><rect x="5.5" y="5.5" width="5" height="5"/></svg></button>
     </div>
     <div class="scale" aria-hidden="true">
-      <svg class="north" viewBox="0 0 16 26"><path d="M8 1 13 15 8 12 3 15Z" fill="currentColor"/><text x="8" y="25" text-anchor="middle" font-size="9" font-weight="700" fill="currentColor" font-family="Barlow Condensed,sans-serif">N</text></svg>
+      <svg class="north" viewBox="0 0 16 26"><path d="M8 1 13 15 8 12 3 15Z" fill="currentColor"/><text x="8" y="25" text-anchor="middle" font-size="9" font-weight="700" fill="currentColor" font-family="Bricolage Grotesque,sans-serif">N</text></svg>
       <div class="sbar"><i id="sbar"></i><span id="stxt"></span></div>
     </div>
     <div class="hint" id="hint">Clic derecho en el mapa para reportar un problema</div>
@@ -480,7 +480,7 @@ const MAX_DIARIO=5;                 // reportes por dia y por dispositivo
 const NAMES={'CISNEROS':'Cisneros','CISNEROS DE TAPI':'Cisneros de Tapi','CRUZADA SOCIAL':'Cruzada Social','LA ALBORADA':'La Alborada',
  'LA CERAMICA':'La Cerámica','LA SABOYA':'La Saboya','RIOBAMBA NORTE 1 ETAPA':'Riobamba Norte, 1.ª etapa','RIOBAMBA NORTE 3 ETAPA':'Riobamba Norte, 3.ª etapa','TUBASEC':'Tubasec'};
 const nm=b=>NAMES[b]||b||'';
-const TIPOS_REP=['Vía en mal estado','Alumbrado público','Agua o alcantarillado','Basura y limpieza','Parque o espacio público','Otro'];
+const TIPOS_REP=['Vía en mal estado','Agua o alcantarillado','Basura y limpieza','Parque o espacio público','Otro'];
 const TIPOS_ROJO=['Personas libando en vía pública','Venta de bebidas alcohólicas','Discoteca, bar o karaoke','Restaurante que expende alcohol','Venta de alcohol a menores de edad','Venta fuera de horario','Local sin permiso o licencia','Delincuencia o robos','Escándalo o ruido','Otro'];
 const DIAS=['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
 const DIAS_L=['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'];
@@ -556,7 +556,7 @@ function nearestStreet(lo,la,maxM){
 }
 
 /* =================== Simbolos =================== */
-const GL='font-size="10" font-weight="700" text-anchor="middle" font-family="Barlow Semi Condensed,sans-serif"';
+const GL='font-size="10" font-weight="700" text-anchor="middle" font-family="Instrument Sans,sans-serif"';
 const DIA='M0 -10L10 0L0 10L-10 0Z', CHK='M-4 .5L-1.2 3.4L4.2 -3';
 const GLYPH={
   'o-ejecutada':`<circle r="9" fill="var(--ok)" stroke="var(--paper)" stroke-width="2"/><path d="${CHK}" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>`,
@@ -587,7 +587,7 @@ const S={
   on:{obras:true,reports:true,puntos:true,heat:false,inc:false,streets:true,snames:true,barrios:true,manz:true,equip:false,limit:true},
   hide:{obras:new Set(),reports:new Set(['rechazado']),puntos:new Set(),inc:new Set(),equip:new Set()},
   streetMode:'rod',rodSel:new Set(),manzMode:'flat',heatSrc:'both',open:new Set(['obras','puntos']),
-  sel:null,sample:false,basemap:'none',rtab:'stats',recKind:'reports',pick:null,
+  sel:null,basemap:'none',rtab:'stats',recKind:'reports',pick:null,
 };
 
 /* =================== Almacen de datos =================== */
@@ -622,11 +622,28 @@ Store.list=k=>{
   return all.filter(r=>isMine(k,r)||(PUNTOS_ROJOS_PUBLICOS&&['verificado','atendido'].includes(r.estado)));
 };
 const sbH=()=>({apikey:SUPABASE_KEY,Authorization:'Bearer '+(Store.token||SUPABASE_KEY),'Content-Type':'application/json'});
+// Sesion tecnica: el token dura 1 hora; se renueva solo antes de vencer. Si no se puede, se cierra con aviso.
+function saveSession(j){Store.token=j.access_token;Store.admin=true;ssSet('pg_tok',j.access_token);if(j.refresh_token)ssSet('pg_rt',j.refresh_token);ssSet('pg_tok_exp',String(Date.now()+(j.expires_in||3600)*1000-60000))}
+function endSession(msg){const was=Store.admin;Store.token=null;Store.admin=false;['pg_tok','pg_tok_exp','pg_rt'].forEach(k=>ssSet(k,null));if(was&&msg){toast(msg);filtersChanged()}}
+let refreshing=null;
+function authOk(){
+  if(!Store.token||(+ssGet('pg_tok_exp')||0)>Date.now()+30000)return Promise.resolve();
+  if(!refreshing)refreshing=(async()=>{
+    try{const rt=ssGet('pg_rt');if(!rt)throw 0;
+      const r=await fetch(SUPABASE_URL+'/auth/v1/token?grant_type=refresh_token',{method:'POST',headers:{apikey:SUPABASE_KEY,'Content-Type':'application/json'},body:JSON.stringify({refresh_token:rt})});
+      if(!r.ok)throw 0;saveSession(await r.json());
+    }catch(e){endSession('Tu sesión técnica venció. Vuelve a entrar con Acceso técnico.')}
+    finally{refreshing=null}})();
+  return refreshing;
+}
 Store.fetchSb=async()=>{
+  await authOk();let expired=false;
   await Promise.all(Object.values(COLS).map(async c=>{
     try{const r=await fetch(`${SUPABASE_URL}/rest/v1/${c.table}?select=${c.sel}&order=created_at.desc&limit=2000`,{headers:sbH()});
+      if(r.status===401&&Store.admin)expired=true;
       if(r.ok)c.items=(await r.json()).map(c.from).filter(x=>x.id)}catch(e){}
   }));
+  if(expired){endSession('Tu sesión técnica venció. Vuelve a entrar con Acceso técnico.');return Store.fetchSb()}
   if(!Store.admin)await syncMine();
   Store.synced=Date.now();changed();
 };
@@ -663,8 +680,8 @@ Store.init=async()=>{
   }
   if(SUPABASE_URL&&SUPABASE_KEY){
     Store.mode='supabase';
-    const t=ssGet('pg_tok'),e=+ssGet('pg_tok_exp')||0;
-    if(t&&e>Date.now()){Store.token=t;Store.admin=true}
+    const t=ssGet('pg_tok');
+    if(t){Store.token=t;Store.admin=true;await authOk()}
     await Store.fetchSb();
     setInterval(()=>{if(!document.hidden)Store.fetchSb()},60000);
     document.addEventListener('visibilitychange',()=>{if(!document.hidden&&Date.now()-Store.synced>20000)Store.fetchSb()});
@@ -676,26 +693,43 @@ Store.init=async()=>{
 Store.login=async(email,pw)=>{
   const r=await fetch(SUPABASE_URL+'/auth/v1/token?grant_type=password',{method:'POST',headers:{apikey:SUPABASE_KEY,'Content-Type':'application/json'},body:JSON.stringify({email,password:pw})});
   if(!r.ok)throw new Error('login');
-  const j=await r.json();Store.token=j.access_token;Store.admin=true;
-  ssSet('pg_tok',j.access_token);ssSet('pg_tok_exp',String(Date.now()+(j.expires_in||3600)*1000-60000));
+  saveSession(await r.json());
   await Store.fetchSb();
 };
-Store.logout=async()=>{Store.token=null;Store.admin=false;ssSet('pg_tok',null);ssSet('pg_tok_exp',null);await Store.fetchSb()};
+Store.logout=async()=>{
+  try{await fetch(SUPABASE_URL+'/auth/v1/logout',{method:'POST',headers:sbH()})}catch(e){}   // invalida la sesion en el servidor
+  endSession();await Store.fetchSb()};
 async function sbWrite(method,c,q,body){
+  await authOk();
   const r=await fetch(`${SUPABASE_URL}/rest/v1/${c.table}${q}`,{method,headers:Object.assign(sbH(),{Prefer:'return=minimal'}),body:body?JSON.stringify(body):undefined});
   if(!r.ok)throw new Error('http '+r.status);
 }
 const FOTO_MAX=5*1024*1024;
 const FOTO_BASE=SUPABASE_URL+'/storage/v1/object/public/fotos/';
 const safeFoto=u=>(SUPABASE_URL&&typeof u==='string'&&u.startsWith(FOTO_BASE)&&!/["'<>\s]/.test(u))?u:null;  // solo fotos de nuestro bucket
+// Reduce la foto a 1600 px en JPEG: sube rapido con datos moviles y elimina los metadatos
+// de la camara, incluida la ubicacion GPS de quien la tomo.
+async function prepFoto(file){
+  if(!/^image\//.test(file.type)&&!/\.(jpe?g|png|webp|heic|heif)$/i.test(file.name))throw new Error('Adjunta una imagen (foto).');
+  if(file.size>30*1024*1024)throw new Error('La foto pesa demasiado (máximo 30 MB).');
+  try{
+    let bmp;try{bmp=await createImageBitmap(file,{imageOrientation:'from-image'})}catch(e){bmp=await createImageBitmap(file)}
+    const s=Math.min(1,1600/Math.max(bmp.width,bmp.height)),c=document.createElement('canvas');
+    c.width=Math.round(bmp.width*s);c.height=Math.round(bmp.height*s);c.getContext('2d').drawImage(bmp,0,0,c.width,c.height);if(bmp.close)bmp.close();
+    const blob=await new Promise(res=>c.toBlob(res,'image/jpeg',.82));
+    if(blob&&blob.size)return blob;
+  }catch(e){}
+  if(file.size>FOTO_MAX)throw new Error('No se pudo procesar esta foto. Prueba con otra o toma una captura de pantalla.');
+  return file;
+}
 async function uploadFoto(file){
   if(!file)return null;
-  if(!/^image\//.test(file.type))throw new Error('Adjunta una imagen (foto).');
-  if(file.size>FOTO_MAX)throw new Error('La foto pesa demasiado (máximo 5 MB).');
-  const ext=(file.name.split('.').pop()||'jpg').toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,8)||'jpg';
+  const body=await prepFoto(file),type=body.type||file.type||'image/jpeg';
+  const ext=type==='image/jpeg'?'jpg':(type.split('/')[1]||'jpg').replace(/[^a-z0-9]/g,'').slice(0,8)||'jpg';
   const path=uuid()+'.'+ext;
+  await authOk();
   let r;
-  try{r=await fetch(`${SUPABASE_URL}/storage/v1/object/fotos/${path}`,{method:'POST',headers:{apikey:SUPABASE_KEY,Authorization:'Bearer '+(Store.token||SUPABASE_KEY),'Content-Type':file.type},body:file})}
+  try{r=await fetch(`${SUPABASE_URL}/storage/v1/object/fotos/${path}`,{method:'POST',headers:{apikey:SUPABASE_KEY,Authorization:'Bearer '+(Store.token||SUPABASE_KEY),'Content-Type':type},body})}
   catch(e){throw new Error('No se pudo subir la foto. Revisa tu conexión e inténtalo otra vez.')}
   if(!r.ok)throw new Error('No se pudo subir la foto.');
   return `${SUPABASE_URL}/storage/v1/object/public/fotos/${path}`;
@@ -722,33 +756,6 @@ Store.remove=async(k,id)=>{
   if(Store.mode==='supabase'){await sbWrite('DELETE',c,'?id=eq.'+encodeURIComponent(id));return Store.fetchSb()}
   c.items=c.items.filter(x=>x.id!==id);lsSet('pg_'+k,c.items);changed();
 };
-
-/* =================== Datos de ejemplo (solo en memoria) =================== */
-const SAMPLE={reports:[],obras:[],puntos:[]};
-function buildSample(){
-  let s=20261014;const rnd=()=>{s|=0;s=s+0x6D2B79F5|0;let t=Math.imul(s^s>>>15,1|s);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296};
-  const pick=(a,w)=>{if(!w)return a[Math.floor(rnd()*a.length)];let x=rnd()*w.reduce((p,q)=>p+q,0);for(let i=0;i<a.length;i++){x-=w[i];if(x<=0)return a[i]}return a[a.length-1]};
-  const ptIn=()=>{for(let i=0;i<400;i++){const lo=bb[0]+rnd()*(bb[2]-bb[0]),la=bb[1]+rnd()*(bb[3]-bb[1]);const b=barrioAt(lo,la);if(b)return[lo,la,b]}return[LON0,LAT0,barrios[0]]};
-  const near=(lo,la)=>{for(let i=0;i<30;i++){const x=lo+(rnd()-.5)*0.0005,y=la+(rnd()-.5)*0.0005;const b=barrioAt(x,y);if(b)return[x,y,b]}return ptIn()};
-  const ago=max=>Date.now()-Math.floor(Math.pow(rnd(),1.4)*max)*DAY-Math.floor(rnd()*DAY);
-  const libs=incid.filter(x=>x.t==='Libadores');
-  SAMPLE.puntos=Array.from({length:64},(_,i)=>{
-    const [lo,la,b]=rnd()<.7&&libs.length?near(...(()=>{const x=pick(libs);return[x.lon,x.lat]})()):ptIn();
-    const tipo=pick(TIPOS_ROJO,[30,18,10,8,6,10,6,6,5,1]);
-    const dias=DIAS.filter((d,j)=>rnd()<[.12,.1,.12,.2,.62,.74,.3][j]);if(!dias.length)dias.push('Sáb');
-    const st=nearestStreet(lo,la,60);
-    return{id:'ej-p'+i,ejemplo:1,tipo,local:/Discoteca|Restaurante|Venta|Local/.test(tipo)&&rnd()<.6?'Local '+(i+1):'',calle:st?st.n:'',barrio:b.nombre,desc:'',dias,
-      franja:pick(FRANJAS,[4,10,48,26,12]),reportante:'Vecino de ejemplo',lat:la,lon:lo,estado:pick(['pendiente','verificado','atendido','descartado'],[34,40,18,8]),createdAt:ago(120)};
-  });
-  SAMPLE.reports=Array.from({length:38},(_,i)=>{const [lo,la,b]=ptIn();
-    return{id:'ej-r'+i,ejemplo:1,tipo:pick(TIPOS_REP,[34,22,12,18,10,4]),desc:'Registro de ejemplo para ver las estadísticas.',barrio:b.nombre,lat:la,lon:lo,
-      estado:pick(['pendiente','publicado','en_atencion','resuelto','rechazado'],[18,26,20,30,6]),createdAt:ago(120)}});
-  const OB=['Readoquinado de la calle','Bacheo en la calle','Mantenimiento de aceras en la calle','Iluminación LED en la calle','Señalización vial en la calle','Recapeo de la calle'];
-  const names=streetNames.filter(x=>x.len>200);
-  SAMPLE.obras=Array.from({length:9},(_,i)=>{const st=pick(names),sg=st.segs[Math.floor(st.segs.length/2)],m=U(...sg.pts[Math.floor(sg.pts.length/2)]),b=barrioAt(m[0],m[1])||barrios[0];
-    const est=pick(['ejecutada','ejecucion','programada'],[4,3,3]),off=est==='programada'?-Math.floor(rnd()*40+5):Math.floor(rnd()*100);
-    return{id:'ej-o'+i,ejemplo:1,titulo:pick(OB)+' '+st.n,barrio:b.nombre,estado:est,fecha:new Date(Date.now()-off*DAY).toISOString().slice(0,10),desc:'Obra de ejemplo.',lat:m[1],lon:m[0],createdAt:Date.now()-Math.abs(off)*DAY}});
-}
 
 /* =================== Seleccion de datos =================== */
 const all=k=>Store.list(k);
@@ -1020,7 +1027,7 @@ function renderTree(){
    <div class="opt"><span>Imagen de fondo</span><select data-opt="basemap" aria-label="Imagen de fondo"><option value="none"${S.basemap==='none'?' selected':''}>Ninguna (mapa dibujado)</option><option value="street"${S.basemap==='street'?' selected':''}>Calles reales</option><option value="sat"${S.basemap==='sat'?' selected':''}>Satélite</option></select></div>
    ${baseAttr?`<div class="opt" style="padding-top:0;font-size:10.5px;color:var(--ink-3)">${baseAttr}</div>`:''}`
    +layerRow('streets','Calles',swLine('var(--r-asf)'),streetNames.length,{title:'Calles con nombre dentro de la plataforma',extra:S.on.streets?`<div class="opt"><span>Color</span><select data-opt="streetMode" aria-label="Color de calles"><option value="rod"${S.streetMode==='rod'?' selected':''}>Capa de rodadura</option><option value="tip"${S.streetMode==='tip'?' selected':''}>Jerarquía vial</option><option value="none"${S.streetMode==='none'?' selected':''}>Sin color</option></select></div>${rodLeg}`:''})
-   +layerRow('snames','Nombres de calles',`<svg class="sw" viewBox="0 0 18 18" aria-hidden="true"><text x="9" y="13" text-anchor="middle" font-size="11" font-weight="700" fill="var(--ink-2)" font-family="Barlow Condensed,sans-serif">Ab</text></svg>`,null,{dis:!S.on.streets})
+   +layerRow('snames','Nombres de calles',`<svg class="sw" viewBox="0 0 18 18" aria-hidden="true"><text x="9" y="13" text-anchor="middle" font-size="11" font-weight="700" fill="var(--ink-2)" font-family="Instrument Sans,sans-serif">Ab</text></svg>`,null,{dis:!S.on.streets})
    +layerRow('barrios','Barrios',swFill('none','var(--ink-3)'),barrios.length)
    +layerRow('manz','Manzanas',swFill(S.manzMode==='pob'?'var(--q3)':'var(--block)'),manz.length,{extra:S.on.manz?`<div class="opt"><span>Color</span><select data-opt="manzMode" aria-label="Color de manzanas"><option value="flat"${S.manzMode==='flat'?' selected':''}>Liso</option><option value="pob"${S.manzMode==='pob'?' selected':''}>Habitantes (Censo 2022)</option></select></div>${ramp}`:''})
    +layerRow('equip','Equipamientos',sw('eq'),eq.filter(x=>!S.hide.equip.has(x.c)).length,{subs:EQ_C.map((k,i)=>subRow('equip',i,k,k,sw('eq'),ce[k])).join('')})
@@ -1129,7 +1136,7 @@ function renderStats(){
     }
   }
   h+=section('Obras por estado',stackbar(Object.keys(EST.obras).map(k=>({label:EST.obras[k],v:co[k]||0,c:k==='ejecutada'?'var(--ok)':k==='ejecucion'?'var(--wip)':'var(--plan)'})),{empty:'No hay obras publicadas en este filtro.'}));
-  if(R.length){const ct=count(R,x=>x.tipo);h+=section('Reportes por tipo',hbars(TIPOS_REP.filter(t=>ct[t]).sort((a,b)=>ct[b]-ct[a]).map(t=>({label:t,v:ct[t],c:'var(--rep)'}))))}
+  if(R.length){const ct=count(R,x=>x.tipo);h+=section('Reportes por tipo',hbars(TIPOS_REP.concat(Object.keys(ct).filter(t=>!TIPOS_REP.includes(t))).filter(t=>ct[t]).sort((a,b)=>ct[b]-ct[a]).map(t=>({label:t,v:ct[t],c:'var(--rep)'}))))}
   if(canSeeInc()&&I.length){
     const ci=count(incRows({noSub:true}),x=>x.t),lib=ci.Libadores||0,tot=Object.values(ci).reduce((a,b)=>a+b,0);
     h+=section('Incidentes en vía pública',hbars(INC_T.filter(t=>ci[t]).map(t=>({label:t,v:ci[t],c:'var(--inc)',off:S.hide.inc.has(t),act:'itype:'+INC_T.indexOf(t)})))
@@ -1296,7 +1303,7 @@ $('#modal').addEventListener('keydown',e=>{
 });
 const optsOf=a=>'<option value="">Elige una opción</option>'+a.map(t=>`<option>${esc(t)}</option>`).join('');
 const whereHtml=pt=>`<div class="where"><b>${esc(pt.barrio?nm(pt.barrio.nombre):'Plataforma G')}</b>${pt.calle?' · '+esc(pt.calle):''}<span class="num">UTM 17S ${utmTxt(pt.lon,pt.lat)}</span></div>`;
-function quota(){const hoy=new Date().toISOString().slice(0,10);let c=lsGet('pg_cuota',{d:hoy,n:0});if(c.d!==hoy)c={d:hoy,n:0};return c}
+function quota(){const d=new Date(),hoy=d.getFullYear()+'-'+(d.getMonth()+1)+'-'+d.getDate();let c=lsGet('pg_cuota',{d:hoy,n:0});if(c.d!==hoy)c={d:hoy,n:0};return c}
 const bumpQuota=c=>{c.n++;lsSet('pg_cuota',c)};
 const actsHtml=(id,label,cls)=>`<div class="err" id="${id}Err" role="alert"></div><div class="acts"><button type="button" class="btn alt" data-close-m>Cancelar</button><button type="submit" class="btn ${cls||''}" id="${id}Send">${label}</button></div>`;
 function formReporte(){
