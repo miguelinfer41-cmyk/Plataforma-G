@@ -969,7 +969,7 @@ function renderTree(){
    +layerRow('obras','Obras',sw('o-ejecucion'),o.filter(x=>!S.hide.obras.has(x.estado)).length,{subs:Object.keys(EST.obras).map((k,i)=>subRow('obras',i,k,EST.obras[k],sw('o-'+k),co[k])).join('')})
    +layerRow('reports','Reportes de vecinos',sw('r-publicado'),r.filter(x=>!S.hide.reports.has(x.estado||'pendiente')).length,{subs:visR.map((k,i)=>subRow('reports',i,k,EST.reports[k],sw('r-'+k),cr[k])).join('')})
    +'</div>';
-  h+=`<div class="sec"><div class="lab">Control de alcohol${canSeeAlcohol()?'':'<small>Solo ves los tuyos</small>'}</div>`
+  h+=`<div class="sec"><div class="lab">Puntos de riesgo${canSeeAlcohol()?'':'<small>Solo ves los tuyos</small>'}</div>`
    +layerRow('puntos','Puntos rojos',sw('p-verificado'),p.filter(x=>!S.hide.puntos.has(x.tipo)).length,{subs:TIPOS_ROJO.map((k,i)=>subRow('puntos',i,k,k,sw('p-verificado'),cp[k])).join('')});
   if(canSeeAlcohol()){
     h+=layerRow('heat','Mapa de calor',`<svg class="sw" viewBox="0 0 18 18" aria-hidden="true"><defs><radialGradient id="hg"><stop offset="0" stop-color="#8C0C14"/><stop offset=".5" stop-color="#E8501E"/><stop offset="1" stop-color="#FDBA4D" stop-opacity=".2"/></radialGradient></defs><circle cx="9" cy="9" r="8" fill="url(#hg)"/></svg>`,null,
