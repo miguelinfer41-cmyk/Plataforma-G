@@ -144,6 +144,19 @@ button{cursor:pointer}
 .chip[aria-pressed="true"]{background:var(--red);border-color:var(--red);color:#fff}
 .chip.est[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:var(--paper)}
 .note{font-size:12.5px;color:var(--ink-3);margin:6px 0 0}
+.rods{display:flex;flex-wrap:wrap;gap:5px;padding:2px 0 6px 40px}
+.rchip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--rule-2);background:var(--paper);border-radius:999px;padding:4px 10px 4px 8px;font-size:12.5px;font-weight:600;color:var(--ink-2);transition:background .15s,border-color .15s,color .15s}
+.rchip i{width:10px;height:10px;border-radius:3px;flex:0 0 10px}
+.rchip .num{font-weight:500;color:var(--ink-3);font-size:11.5px}
+.rchip:hover{border-color:var(--ink-3)}
+.rchip[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:var(--paper)}
+.rchip[aria-pressed="true"] .num{color:color-mix(in srgb,var(--paper) 70%,transparent)}
+.rnote{padding-left:40px;margin-top:0}
+.rstreets{margin:2px 0 8px 40px;border-left:2px solid var(--rule-2);padding-left:8px;max-height:260px;overflow:auto}
+.rsum{margin:0 0 4px;font-size:12.5px;color:var(--ink-2)}
+.rst{display:flex;justify-content:space-between;gap:8px;width:100%;border:0;background:none;padding:5px 6px;border-radius:7px;text-align:left;font-size:13px}
+.rst:hover{background:var(--paper-2)}
+.rst .num{color:var(--ink-3);font-size:12px;white-space:nowrap}
 
 /* ---------- Mapa ---------- */
 .mapwrap{grid-area:map;position:relative;min-width:0;min-height:0;overflow:hidden;background:var(--ground)}
@@ -571,7 +584,7 @@ const S={
   period:'all',barrio:null,days:new Set(),pEst:new Set(['pendiente','verificado','atendido']),
   on:{obras:true,reports:true,puntos:true,heat:false,inc:false,streets:true,snames:true,barrios:true,manz:true,equip:false,limit:true},
   hide:{obras:new Set(),reports:new Set(['rechazado']),puntos:new Set(),inc:new Set(),equip:new Set()},
-  streetMode:'rod',manzMode:'flat',heatSrc:'both',open:new Set(['obras','puntos']),
+  streetMode:'rod',rodSel:new Set(),manzMode:'flat',heatSrc:'both',open:new Set(['obras','puntos']),
   sel:null,sample:false,basemap:'none',rtab:'stats',recKind:'reports',pick:null,
 };
 
@@ -872,6 +885,7 @@ function drawStreets(){
   L.streets.innerHTML='';if(!S.on.streets)return;
   const groups={};
   segs.forEach(s=>{
+    if(S.rodSel.size&&!S.rodSel.has(s.r))return;
     const cls=S.streetMode==='rod'?s.r:S.streetMode==='tip'?s.t:'_';
     const key=cls+'|'+s.t+'|'+(s.m>0?1:0);(groups[key]=groups[key]||[]).push(s.d);
   });
@@ -984,7 +998,21 @@ function renderTree(){
      +'</div>';
   }
   const ramp=S.manzMode==='pob'?`<div class="ramp" aria-label="Habitantes por manzana">${['0','1–24','25–49','50–99','100–199','200+'].map((t,i)=>`<span style="--c:var(--q${i})">${t}</span>`).join('')}</div>`:'';
-  const rodLeg=S.streetMode==='rod'?`<div class="ramp" style="flex-wrap:wrap;gap:4px 8px">${ROD.filter(x=>segs.some(s=>s.r===x&&s.m>0)).map(x=>`<span style="--c:${ROD_C[x]};flex:0 0 auto;min-width:48px">${x}</span>`).join('')}</div>`:'';
+  const fmtL=m=>m>=1000?nf1.format(m/1000)+' km':nf.format(Math.round(m))+' m',inB=s=>s.m>0&&(S.barrio==null||s.b===S.barrio);
+  const rodLen={};segs.forEach(s=>{if(inB(s))rodLen[s.r]=(rodLen[s.r]||0)+s.m});
+  let rodLeg='';
+  if(S.streetMode==='rod'){
+    rodLeg=`<div class="rods" role="group" aria-label="Filtrar calles por capa de rodadura">${ROD.filter(x=>rodLen[x]).map(x=>`<button type="button" class="rchip" data-rod="${x}" aria-pressed="${S.rodSel.has(x)}"><i style="background:${ROD_C[x]}"></i>${x}<span class="num">${fmtL(rodLen[x])}</span></button>`).join('')}</div>`;
+    if(!S.rodSel.size)rodLeg+=`<p class="note rnote">Toca un tipo para ver solo esas calles y su lista.</p>`;
+    else{
+      const by={};let sinN=0,tot=0;
+      segs.forEach(s=>{if(inB(s)&&S.rodSel.has(s.r)){tot+=s.m;if(s.n)by[s.n]=(by[s.n]||0)+s.m;else sinN+=s.m}});
+      const ls=Object.entries(by).sort((a,b)=>b[1]-a[1]);
+      rodLeg+=`<div class="rstreets"><p class="rsum"><b>${ls.length} calle${ls.length===1?'':'s'}</b> con ${[...S.rodSel].map(x=>x.toLowerCase()).join(' o ')}: ${fmtL(tot)}</p>`
+        +ls.map(([n,m])=>`<button type="button" class="rst" data-rstreet="${esc(n)}"><span>${esc(n)}</span><span class="num">${fmtL(m)}</span></button>`).join('')
+        +(sinN?`<p class="note">Tramos sin nombre: ${fmtL(sinN)}</p>`:'')+`</div>`;
+    }
+  }
   const baseAttr=S.basemap==='sat'?'Imagen: Esri, Maxar, Earthstar Geographics':S.basemap==='street'?'Mapa: © colaboradores de OpenStreetMap':'';
   h+=`<div class="sec"><div class="lab">Base cartográfica<small>Censo 2022 · catastro vial</small></div>
    <div class="opt"><span>Imagen de fondo</span><select data-opt="basemap" aria-label="Imagen de fondo"><option value="none"${S.basemap==='none'?' selected':''}>Ninguna (mapa dibujado)</option><option value="street"${S.basemap==='street'?' selected':''}>Calles reales</option><option value="sat"${S.basemap==='sat'?' selected':''}>Satélite</option></select></div>
@@ -1002,12 +1030,12 @@ function renderTree(){
   if(fid){const f=document.getElementById(fid);if(f&&box.contains(f))f.focus({preventScroll:true})}
 }
 function activeFilters(){
-  let n=0;if(S.period!=='all')n++;if(S.barrio!=null)n++;if(S.days.size)n++;if(S.pEst.size!==3||S.pEst.has('descartado'))n++;
+  let n=0;if(S.period!=='all')n++;if(S.barrio!=null)n++;if(S.days.size)n++;if(S.rodSel.size)n++;if(S.pEst.size!==3||S.pEst.has('descartado'))n++;
   ['obras','puntos','inc','equip'].forEach(k=>{if(S.hide[k].size)n++});if(!(S.hide.reports.size===1&&S.hide.reports.has('rechazado'))&&S.hide.reports.size)n++;
   return n;
 }
 function clearFilters(){
-  S.period='all';S.barrio=null;S.days.clear();S.pEst=new Set(['pendiente','verificado','atendido']);
+  S.period='all';S.barrio=null;S.days.clear();S.rodSel.clear();S.pEst=new Set(['pendiente','verificado','atendido']);
   Object.keys(S.hide).forEach(k=>S.hide[k].clear());S.hide.reports.add('rechazado');
   closePop();flyTo(home());filtersChanged();
 }
@@ -1017,7 +1045,7 @@ $('#tree').addEventListener('change',e=>{
     if(t.dataset.ly==='heat'||t.dataset.ly==='puntos'||t.dataset.ly==='inc')inval(F.HEAT);
     inval(F.BASE|F.MARK|F.TREE);if(S.sel&&!S.on[S.sel.kind])closePop();return}
   if(t.dataset.sub){const s=S.hide[t.dataset.sub];t.checked?s.delete(t.dataset.key):s.add(t.dataset.key);if(!t.checked)S.on[t.dataset.sub]=true;filtersChanged();return}
-  if(t.dataset.opt){S[t.dataset.opt]=t.value;if(t.dataset.opt==='basemap'){svg.classList.toggle('has-base',S.basemap!=='none');scheduleBase()}inval(t.dataset.opt==='heatSrc'?F.HEAT|F.TREE:F.BASE|F.TREE);return}
+  if(t.dataset.opt){S[t.dataset.opt]=t.value;if(t.dataset.opt==='streetMode'&&t.value!=='rod')S.rodSel.clear();if(t.dataset.opt==='basemap'){svg.classList.toggle('has-base',S.basemap!=='none');scheduleBase()}inval(t.dataset.opt==='heatSrc'?F.HEAT|F.TREE:F.BASE|F.TREE);return}
   if(t.id==='fBarrio'){setBarrio(t.value===''?null:+t.value)}
 });
 $('#tree').addEventListener('click',e=>{
@@ -1026,6 +1054,8 @@ $('#tree').addEventListener('click',e=>{
   if(b.dataset.period){S.period=b.dataset.period;filtersChanged()}
   else if(b.dataset.day){S.days.has(b.dataset.day)?S.days.delete(b.dataset.day):S.days.add(b.dataset.day);filtersChanged()}
   else if(b.dataset.pest){S.pEst.has(b.dataset.pest)?S.pEst.delete(b.dataset.pest):S.pEst.add(b.dataset.pest);filtersChanged()}
+  else if(b.dataset.rod){const r=b.dataset.rod;S.rodSel.has(r)?S.rodSel.delete(r):S.rodSel.add(r);S.on.streets=true;inval(F.BASE|F.TREE)}
+  else if(b.dataset.rstreet){const n=b.dataset.rstreet,g=segs.filter(s=>s.n===n&&s.m>0&&S.rodSel.has(s.r)&&(S.barrio==null||s.b===S.barrio));if(g.length)showStreet({n,segs:g,len:g.reduce((a,s)=>a+s.m,0)})}
   else if(b.dataset.act==='clear')clearFilters();
 });
 
@@ -1409,6 +1439,8 @@ function showStreet(s){
   let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;s.segs.forEach(g=>g.pts.forEach(p=>{x0=Math.min(x0,p[0]);x1=Math.max(x1,p[0]);y0=Math.min(y0,p[1]);y1=Math.max(y1,p[1])}));
   L.hi.innerHTML='';el('path',{'class':'sthi',d:s.segs.map(g=>g.d).join('')},L.hi);
   S.on.streets=true;S.on.snames=true;inval(F.BASE|F.TREE);
+  const mn=Math.max(P1[0]-P0[0],P1[1]-P0[1])*.22,cx=(x0+x1)/2,cy=(y0+y1)/2;   // tramos cortos: deja ver la cuadra alrededor
+  if(x1-x0<mn){x0=cx-mn/2;x1=cx+mn/2}if(y1-y0<mn){y0=cy-mn/2;y1=cy+mn/2}
   flyTo(fitBox([x0,y0,x1,y1],1.6));clearTimeout(hiT);hiT=setTimeout(()=>{L.hi.innerHTML=''},5000);
   toast(`${s.n}: ${nf.format(Math.round(s.len))} m dentro de la plataforma.`);
 }
